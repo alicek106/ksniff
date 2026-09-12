@@ -121,6 +121,12 @@ This issue happens when using an old version of Wireshark or TShark to read the 
 
 **Everything below this line was added after forking from the now-unmaintained [eldadru/ksniff](https://github.com/eldadru/ksniff).** The README content above this line is the untouched original upstream text.
 
+### Installing as `kubectl sniff` (no krew needed)
+
+kubectl's plugin mechanism auto-discovers any executable named `kubectl-<verb>` that's on `$PATH` - no krew involved. `make darwin`/`make linux`/`make windows` already produce a correctly-named `kubectl-sniff*` binary, and `make install` copies it onto `$PATH` (see the Makefile's `PLUGIN_FOLDER` logic). Once it's there, `kubectl sniff` just works.
+
+Real krew (`kubectl krew install sniff`) isn't an option for this fork: the plugin name `sniff` is already taken in the official krew-index by upstream `eldadru/ksniff`, so a personal fork can't be published there under the same name. A custom krew index (a second repo just to host a `.krew.yaml` + GitHub Releases) was considered and skipped - unnecessary indirection for a single-machine personal install.
+
 ### Docker runtime support removed
 
 Docker/dockershim as a node container runtime is no longer supported - it was removed from Kubernetes itself in 1.24, so there's no cluster left to target with it. `DockerBridge` and its tests were deleted; `NewContainerRuntimeBridge("docker")` no longer exists.
