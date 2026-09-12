@@ -114,3 +114,55 @@ tshark: The standard input contains record data that TShark doesn't support.
 ```
 
 This issue happens when using an old version of Wireshark or TShark to read the pcap created by ksniff. Upgrade Wireshark or TShark to resolve this issue. Ubuntu LTS versions may have this problem with stock package versions but using the [Wireshark PPA will help](https://github.com/eldadru/ksniff/issues/100#issuecomment-789503442).
+
+---
+
+## Fork Notes
+
+**Everything below this line was added after forking from the now-unmaintained [eldadru/ksniff](https://github.com/eldadru/ksniff).** The README content above this line is the untouched original upstream text.
+
+### Docker runtime support removed
+
+Docker/dockershim as a node container runtime is no longer supported - it was removed from Kubernetes itself in 1.24, so there's no cluster left to target with it. `DockerBridge` and its tests were deleted; `NewContainerRuntimeBridge("docker")` no longer exists.
+
+### Building & publishing the privileged-pod images (multi-arch)
+
+`-p`/`--privileged` mode doesn't run the `kubectl-sniff` binary itself on the cluster - it spins up a separate "privileged pod" on the target node and, depending on the node's container runtime, either runs `tcpdump` directly inside it or spawns one more sibling container next to it. Those images used to be x86_64-only, third-party images (`docker.io/hamravesh/ksniff-helper` and `docker.io/maintained/tcpdump`) that this repo never built. `build/tcpdump` and `build/helper` now contain this fork's own Dockerfiles for them, published as multi-arch (amd64+arm64) images to this fork's public ECR (`public.ecr.aws/o5v4y7w2/`) - only relevant to this fork's maintainer, not to upstream ksniff users.
+
+| Runtime | Role | Image | Source |
+|---|---|---|---|
+| CRI-O | the privileged pod itself | `ksniff-tcpdump` | `build/tcpdump` |
+| containerd | the privileged pod itself | `ksniff-helper` | `build/helper` |
+| containerd | sibling container spawned via `ctr run` | `ksniff-tcpdump` | `build/tcpdump` |
+
+To rebuild and publish both images locally (no GitHub CI involved):
+
+    # one-time: ECR Public doesn't auto-create repositories on push
+    aws ecr-public create-repository --repository-name ksniff-tcpdump --region us-east-1
+    aws ecr-public create-repository --repository-name ksniff-helper --region us-east-1
+
+    # one-time: authenticate to ECR Public (the API is always us-east-1, regardless of the alias's actual region)
+    aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+
+    # one-time: a buildx builder that can actually produce arm64 output
+    docker buildx create --use
+
+    make images
+
+`make images` pushes `public.ecr.aws/o5v4y7w2/ksniff-tcpdump:v1` and `public.ecr.aws/o5v4y7w2/ksniff-helper:v1` (see `IMAGE_REGISTRY`/`IMAGE_TAG` in the Makefile). **Bump `IMAGE_TAG` on every rebuild you intend to actually use** - the privileged pod is created with `ImagePullPolicy: IfNotPresent`, so pushing over the same tag can leave any node that already pulled it silently running the old image.
+
+The tag lives in two independent places, so bumping the Makefile's `IMAGE_TAG` alone isn't enough to actually use a new build: `kubectl-sniff` itself only knows about the tag compiled into `DefaultHelperImage`/`DefaultTcpdumpImage` in `pkg/service/sniffer/runtime/runtime.go`. After pushing a new tag, either update those two constants and rebuild `kubectl-sniff`, or skip touching the constants and just set `KSNIFF_HELPER_IMAGE`/`KSNIFF_TCPDUMP_IMAGE` to the new tag in the environment ksniff runs in.
+
+### Overriding the default images without rebuilding
+
+The upstream `--image`/`--tcpdump-image` flags (see "Air gapped environments" above) still override the image for a single invocation. This fork adds one more layer underneath them: set `KSNIFF_HELPER_IMAGE` and/or `KSNIFF_TCPDUMP_IMAGE` in the environment `kubectl-sniff` runs in to change the *compiled-in default* without a flag on every invocation and without rebuilding the binary.
+
+Precedence, highest first:
+1. `--image`/`--tcpdump-image` flag (or its `KUBECTL_PLUGINS_LOCAL_FLAG_*` env var)
+2. `KSNIFF_HELPER_IMAGE`/`KSNIFF_TCPDUMP_IMAGE`
+3. the compiled-in default (`public.ecr.aws/o5v4y7w2/ksniff-helper:v1` / `public.ecr.aws/o5v4y7w2/ksniff-tcpdump:v1`)
+
+### Compatibility notes
+
+- **Pod Security Admission.** The privileged pod ksniff creates runs `privileged: true`, `hostPID: true`, with the node's `/` bind-mounted. On a namespace enforcing the `baseline` or `restricted` Pod Security Standard (the built-in replacement for PodSecurityPolicy, stable since Kubernetes 1.25), pod creation will be rejected. Run `-p`/`--privileged` mode against a namespace labelled (or defaulted to) `enforce: privileged`.
+- **`make install` and `kubectl version --short`.** The Makefile detects the installed kubectl's minor version via `kubectl version --client=true --short=true -o yaml`. The `--short` flag was deprecated in kubectl 1.24 and removed entirely in 1.28, so this detection (and `make install`) breaks on any current kubectl. Not fixed as part of this pass; the one-line fix is to drop `--short` and read `clientVersion.minor` from the plain YAML output.
