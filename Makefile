@@ -1,6 +1,8 @@
 TCPDUMP_VERSION=4.9.2
 STATIC_TCPDUMP_NAME=static-tcpdump
 NEW_PLUGIN_SYSTEM_MINIMUM_KUBECTL_VERSION=12
+IMAGE_REGISTRY=public.ecr.aws/o5v4y7w2
+IMAGE_TAG=v1
 UNAME := $(shell uname)
 ARCH_NAME := $(shell uname -m)
 KUBECTL_MINOR_VERSION=$(shell kubectl version --client=true --short=true -o yaml | grep minor | grep -Eow "[0-9]+")
@@ -62,6 +64,19 @@ uninstall:
 
 verify_version:
 	./scripts/verify_version.sh
+
+# Builds and pushes the privileged-pod helper images (multi-arch: amd64+arm64)
+# to the user's own public ECR. Requires `docker buildx create --use` once,
+# and `aws ecr-public get-login-password ... | docker login` beforehand.
+# Bump IMAGE_TAG on every rebuild - the privileged pod uses ImagePullPolicy:
+# IfNotPresent, so reusing a tag can silently keep serving a stale cached image.
+images: images-tcpdump images-helper
+
+images-tcpdump:
+	docker buildx build --platform linux/amd64,linux/arm64 -t $(IMAGE_REGISTRY)/ksniff-tcpdump:$(IMAGE_TAG) --push build/tcpdump
+
+images-helper:
+	docker buildx build --platform linux/amd64,linux/arm64 -t $(IMAGE_REGISTRY)/ksniff-helper:$(IMAGE_TAG) --push build/helper
 
 clean:
 	rm -f kubectl-sniff

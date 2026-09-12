@@ -61,9 +61,9 @@ func (d *ContainerdBridge) BuildCleanupCommand() []string {
 }
 
 func (d ContainerdBridge) GetDefaultImage() string {
-	return "docker.io/hamravesh/ksniff-helper:v3"
+	return imageFromEnv(EnvHelperImage, DefaultHelperImage)
 }
 
 func (d *ContainerdBridge) GetDefaultTCPImage() string {
-	return "docker.io/maintained/tcpdump:latest"
+	return imageFromEnv(EnvTcpdumpImage, DefaultTcpdumpImage)
 }

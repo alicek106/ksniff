@@ -61,7 +61,7 @@ func (c *CrioBridge) BuildCleanupCommand() []string {
 }
 
 func (c *CrioBridge) GetDefaultImage() string {
-	return "maintained/tcpdump"
+	return imageFromEnv(EnvTcpdumpImage, DefaultTcpdumpImage)
 }
 
 func (c *CrioBridge) GetDefaultSocketPath() string {
